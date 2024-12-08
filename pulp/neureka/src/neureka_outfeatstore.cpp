@@ -15,87 +15,103 @@
  * limitations under the License.
  */
 
-/* 
+/*
  * Authors: Arpan Suravi Prasad, ETH Zurich (prasadar@iis.ee.ethz.ch)
  */
 #include "neureka.hpp"
-#include <type_traits>
 #include <limits.h>
+#include <type_traits>
+#include <assert.h>
+
+
 void Neureka::OutFeatStoreSetup() {
-  StreamerConfig streamer_config = this->ctrl_instance.GetOutFeatStoreStreamerConfig();
-  this->outfeat_streamer_instance.UpdateParams(streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2, L1BandwidthInBytes, 4);
+  StreamerConfig config = this->ctrl_instance.GetOutFeatStoreStreamerConfig();
+  this->outfeat_streamer_instance.Init(config.base_addr, config.stride.d0,
+                                               config.stride.d1, config.stride.d2,
+                                               config.length.d0, config.length.d1,
+                                               config.length.d2);
   this->ctrl_instance.ResetOutFeatStoreIteration();
-  if(this->trace_config.setup.outfeat_store)
-    this->trace.msg("OutFeatStore Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
+  if (this->trace_config.setup.outfeat_store)
+    this->trace.msg("OutFeatStore Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : "
+                    "0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n",
+                    config.base_addr, config.stride.d0, config.stride.d1,
+                    config.stride.d2, config.length.d0, config.length.d1,
+                    config.length.d2);
 }
-void Neureka::ResetAllAccumBuffer(){
-  for(int i=0; i<NeurekaTotalPECountXY; i++)
+
+void Neureka::ResetAllAccumBuffer() {
+  for (int i = 0; i < NeurekaTotalPECountXY; i++)
     this->pe_instances[i].ResetAllAccumBuffer();
 }
-OutFeatType Neureka::OutFeatQuant(const OutFeatType input){
-  OutFeatType output = input;
-  if(reg_config_.config0.quantization_bit_count==8 && reg_config_.config0.outfeat_quant)
-    if(reg_config_.config0.use_relu || reg_config_.config0.signed_outfeat==false){
-      if(input < 0) output = 0;
-      else if (input>255) output = 255;
-      return output;
-    }else{
-      if(input < -128) output = -128;
-      else if (input>127) output = 127;
-      return output;
-    }
-  else if (reg_config_.config0.quantization_bit_count==32 && reg_config_.config0.outfeat_quant)
-    if(reg_config_.config0.use_relu || reg_config_.config0.signed_outfeat==false){
-      if(input < 0) output = 0;
-      else if (input>0xffffffff) output = 0xffffffff;
-      return output;
-    }else{ 
-       if(input < INT_MIN) output = INT_MIN;
-      else if (input>0xffffffff) output = 0xffffffff;
-      return output;
-    }
-  else 
-    return output;
+
+static inline OutFeatType clamp(const OutFeatType val, const OutFeatType low, const OutFeatType high) {
+  return std::max(low, std::min(high, val));
 }
-bool Neureka::OutFeatStoreExecute(int& latency)
-{
+
+static inline void limits(const int bits, const bool is_unsigned, OutFeatType& low, OutFeatType& high) {
+  if (bits == 8 && is_unsigned) {
+    low = 0; high = 255;
+  } else if (bits == 8 && !is_unsigned) {
+    low = -128; high = 127;
+  } else if (bits == 32 && is_unsigned) {
+    low = 0; high = 0xffffffff;
+  } else if (bits == 32 && !is_unsigned) {
+    low = INT_MIN; high = 0xffffffff;
+  }
+}
+
+OutFeatType Neureka::OutFeatQuant(const OutFeatType input) {
+  const auto bits = reg_config_.config0.quantization_bit_count;
+  assert((bits == 8 || bits == 32) && "Invalid value of bits for output quantization.");
+  const bool is_unsigned = reg_config_.config0.use_relu || reg_config_.config0.signed_outfeat == false;
+
+  OutFeatType low, high;
+  limits(bits, is_unsigned, low, high);
+
+  if (reg_config_.config0.outfeat_quant)
+    return clamp(input, low, high);
+  else
+    return input;
+}
+
+bool Neureka::OutFeatStoreExecute(int &latency) {
   int width = this->ctrl_instance.OutFeatStoreWidth();
-  int pe_index = this->ctrl_instance.GetOutFeatStoreLinearBufferIndex();// which accumulator buffer to be used
+  int pe_index =
+      this->ctrl_instance.GetOutFeatStoreLinearBufferIndex(); // which accumulator buffer to be used
   int word_index = this->ctrl_instance.GetOutFeatStoreWordIndex();
   StreamerDataType store_data[L1BandwidthInBytes];
 
   // std::cout<<"pe_index="<<pe_index<<"\n";
-  if(this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count==32){
-    for(int i=0; i<width/4; i++){
-        OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(word_index+i);
-        OutFeatType data = OutFeatQuant(temp_data);
-        for(int j=0; j<4; j++){
-          StreamerDataType streamer_data = (data & (0xFF << 8*j)) >> (8*j);
-          store_data[i*4+j] = streamer_data;
-        }
+  if (this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count == 32) {
+    for (int i = 0; i < width / 4; i++) {
+      OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(word_index + i);
+      OutFeatType data = OutFeatQuant(temp_data);
+      for (int j = 0; j < 4; j++) {
+        StreamerDataType streamer_data = (data & (0xFF << 8 * j)) >> (8 * j);
+        store_data[i * 4 + j] = streamer_data;
+      }
     }
-  } else if (this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count==8) {
-    for(int i=0; i<width; i++){
-        OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(i);
-        OutFeatType data = OutFeatQuant(temp_data);
-        store_data[i] = (StreamerDataType)data; 
+  } else if (this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count == 8) {
+    for (int i = 0; i < width; i++) {
+      OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(i);
+      OutFeatType data = OutFeatQuant(temp_data);
+      store_data[i] = (StreamerDataType)data;
     }
-  }
-  else this->trace.fatal("Unsupported Quantization bit count \n");
+  } else
+    this->trace.fatal("Unsupported Quantization bit count \n");
 
-  
-  int64_t cycles = 0;
+  uint64_t cycles = 0;
 
-  this->outfeat_streamer_instance.VectorStore(store_data, width, cycles, false, this->trace_config.streamer.outfeat_store);
-  latency = latency + (int)cycles ? latency + (int)cycles : 1 ;
+  this->outfeat_streamer_instance.VectorStore(store_data, width, cycles,
+                                              this->trace_config.streamer.outfeat_store);
+  latency = latency + (int)cycles ? latency + (int)cycles : 1;
   this->num_mem_access_bytes.outfeat_store += width;
-  
+
   this->ctrl_instance.OutFeatStoreIteration();
   bool streamout_done = this->ctrl_instance.load_store_status.outfeat.done;
-  if(streamout_done){
+  if (streamout_done) {
     ResetAllAccumBuffer();
   }
- 
 
   return streamout_done;
 }

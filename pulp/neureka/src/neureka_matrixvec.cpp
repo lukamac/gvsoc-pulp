@@ -30,11 +30,9 @@ void Neureka::WeightLoadSetup() {
       this->infeat_dual_buffer_read_index = 1;
   }
 
-  StreamerConfig streamer_config = this->ctrl_instance.GetWeightLoadStreamerConfig();
+  StreamerConfig config = this->ctrl_instance.GetWeightLoadStreamerConfig();
   
-  int bandwidth = this->reg_config_.config0.weight_from_wmem ? WmemBandwidthInBytes : L1BandwidthInBytes;
-  
-  this->weight_streamer_instance.UpdateParams(streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2, bandwidth, 4);
+  this->weight_streamer_instance.Init(config.base_addr, config.stride.d0, config.stride.d1, config.stride.d2, config.length.d0, config.length.d1, config.length.d2);
   
   this->ctrl_instance.ResetWeightLoadIteration();
   // this->trace.msg("Weight load setup %d \n", this->infeat_dual_buffer_read_index);
@@ -43,14 +41,14 @@ void Neureka::WeightLoadSetup() {
   this->infeat_buffer_instance.MapInFeatToEngines(this->infeat_dual_buffer_read_index, this->reg_config_.config0.filter_mode);
   
   if(this->trace_config.setup.weight_load)
-    this->trace.msg("WeightLoad Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
+    this->trace.msg("WeightLoad Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", config.base_addr, config.stride.d0, config.stride.d1, config.stride.d2, config.length.d0, config.length.d1, config.length.d2);
 
 }
 
 void Neureka::WeightLoad(int& latency, std::array<StreamerDataType, WmemBandwidthInBytes>& weight) {
   int width = WmemBandwidthInBytes;
   // Load data using streamer
-  int64_t cycles = 0;
+  uint64_t cycles = 0;
   StreamerDataType weight_data_temp[width];
   if(reg_config_.config0.residual)  {
 
@@ -59,7 +57,7 @@ void Neureka::WeightLoad(int& latency, std::array<StreamerDataType, WmemBandwidt
     }
   }
   else{
-    this->weight_streamer_instance.VectorLoad(width, cycles,  weight_data_temp, this->reg_config_.config0.weight_from_wmem, this->trace_config.streamer.weight_load);
+    this->weight_streamer_instance.VectorLoad(weight_data_temp, width, cycles, this->trace_config.streamer.weight_load);
     this->num_mem_access_bytes.weight_load += width;
     latency = (latency + (int)cycles) ? (latency + (int)cycles) : 1 ;
   }
@@ -96,8 +94,6 @@ void Neureka::WeightUnpack(Mode filter_mode,  std::array<StreamerDataType, WmemB
 }
 
 void Neureka::Accumulate(const std::array<std::array<InFeatType, NeurekaBinConvPerColumnCount>,NeurekaColumnPerPECount>& weight_array) {
-  
-  
   std::array<std::array<std::array<bool,NeurekaBinConvPerColumnCount>,NeurekaColumnPerPECount>,NeurekaTotalPECountXY> compute_binconv_enable = this->ctrl_instance.ComputeBinconvEnable(false);
   std::array<std::array<std::array<InFeatType, NeurekaComputeRowCount>,NeurekaInFeatScalarBufferCount>,NeurekaTotalPECountXY> infeat_mapped_to_pe = this->infeat_buffer_instance.ReadInFeatMappedToPE();
   std::array<bool, NeurekaTotalPECountXY> compute_pe_enable = this->ctrl_instance.ComputePEEnable();
@@ -139,8 +135,8 @@ void Neureka::Accumulate(const std::array<std::array<InFeatType, NeurekaBinConvP
       this->pe_instances[i].CalculatePartialSumAndUpdateAccumBuffer(reg_config_.config0.filter_mode, accum_index, compute_binconv_enable[i], pe_col_enable_array, infeat_mapped_to_pe[i], weight_array, shift_per_pe_array, is_signed);
   }
   // this->trace.msg("mvec accum_0 %d\n", this->pe_instances[0].ReadFromIndexAccumBuffer(0));
-
 }
+
 bool Neureka::WeightLoadExecute(int& latency) {
     Mode filter_mode = this->reg_config_.config0.filter_mode;
     std::array<StreamerDataType,WmemBandwidthInBytes> weight_load_data = {};

@@ -20,63 +20,54 @@
  */
 #include "neureka.hpp"
 #include <type_traits>
+
 void Neureka::InFeatLoadSetup() {
   this->ctrl_instance.ComputeDimensions();
   if(this->reg_config_.config0.infeat_prefetch==true)
     this->infeat_dual_buffer_write_index = this->infeat_dual_buffer_write_index == 1 ? 0 : 1;
   else 
     this->infeat_dual_buffer_write_index = 1;
-  StreamerConfig streamer_config = this->ctrl_instance.GetInFeatLoadStreamerConfig();
-  this->infeat_streamer_instance.UpdateParams(streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2, L1BandwidthInBytes, 4);
+  StreamerConfig config = this->ctrl_instance.GetInFeatLoadStreamerConfig();
+  this->infeat_streamer_instance.Init(config.base_addr, config.stride.d0, config.stride.d1, config.stride.d2, config.length.d0, config.length.d1, config.length.d2);
   this->ctrl_instance.ResetInFeatLoadIteration();
-  if(this->trace_config.setup.infeat_load)
-    this->trace.msg("InFeatLoad Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
 }
 
-bool Neureka::InFeatLoadExecute(int& latency)
-{
-   if(this->ctrl_instance.prefetch_tiles.finish==true && this->reg_config_.config0.infeat_prefetch){
+bool Neureka::InFeatLoadExecute(int& latency) {
+  if(this->ctrl_instance.prefetch_tiles.finish==true && this->reg_config_.config0.infeat_prefetch){
     latency = this->adjust_weightoffset_cycles;
     return true;
   }
 
   int width = L1BandwidthInBytes;
-  int64_t cycles = 0;
-  std::array<bool, NeurekaInFeatScalarBufferCount> padding_enable;
-  std::fill(padding_enable.begin(), padding_enable.end(), 0);
-  padding_enable=this->ctrl_instance.GetPaddingEnable();
+  uint64_t cycles = 0;
+  const auto padding_enable = this->ctrl_instance.GetPaddingEnable();
   this->ctrl_instance.InFeatLoadIteration();
   InFeatType infeat_data_temp[NeurekaInFeatScalarBufferCount];
 
-  this->infeat_streamer_instance.VectorLoad(width, cycles, infeat_data_temp, false, this->trace_config.streamer.infeat_load);
+  this->infeat_streamer_instance.VectorLoad(infeat_data_temp, width, cycles, this->trace_config.streamer.infeat_load);
   int access_width = reg_config_.config0.broadcast ? 1 : width;
   this->num_mem_access_bytes.infeat_load += access_width;
 
-  latency = latency + (int)cycles ? latency + (int)cycles : 1 ;
+  latency = std::max(latency + (int)cycles, 1);
 
   std::array<bool, NeurekaInFeatScalarBufferCount> enable;
   std::array<InFeatType, NeurekaInFeatScalarBufferCount> infeat_data;
 
-
   for(int i=0; i<width; i++){
     if(padding_enable[i]==true)
-      infeat_data_temp[i] = this->reg_config_.padding.value;
+      infeat_data[i] = this->reg_config_.padding.value;
     else if(reg_config_.config0.broadcast)
-      infeat_data_temp[i] = infeat_data_temp[0];
-
-    infeat_data[i] = infeat_data_temp[i];
+      infeat_data[i] = infeat_data_temp[0];
+    else
+      infeat_data[i] = infeat_data_temp[i];
     enable[i] = true; 
   }
 
-  // for(int i=0; i<NeurekaInFeatScalarBufferCount; i++){
-  //   this->trace.msg("enable[%d] : %d\n", i, enable[i]);
-  // }
-
-  // this->trace.msg("Load at buffer index %d \n", this->infeat_dual_buffer_write_index);
   int infeat_buffer_index = this->ctrl_instance.load_store_status.infeat.index.hinXwin;
-  // this->trace.msg("infeat_buffer_index : %d\n", infeat_buffer_index);
   this->infeat_buffer_instance.WriteLinearBufferAtIndex(this->infeat_dual_buffer_write_index, infeat_buffer_index, enable, infeat_data);
+  this->infeat_buffer_instance.print_input_buffer(infeat_buffer_index);
   if(this->ctrl_instance.load_store_status.infeat.done)
     this->ctrl_instance.PrefetchCheckTileStatus();
+
   return this->ctrl_instance.load_store_status.infeat.done;
 }
