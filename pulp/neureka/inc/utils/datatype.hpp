@@ -243,12 +243,11 @@ struct TilingStatus{
 struct LoadInFeat{
   int hin;
   int win;
-  int hinXwin;
 };
+
 struct LoadInFeatStatus{
   LoadInFeat count;
   LoadInFeat index;
-  bool done;
 };
 
 struct LoadWeight{
