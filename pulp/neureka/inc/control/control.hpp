@@ -372,7 +372,7 @@ void WeightLoadIteration(){
       load_store_status.weight.index.wgt  = qw_index < qw_count ? load_store_status.weight.index.wgt+1 : load_store_status.weight.index.wgt;
       load_store_status.weight.done       = qw_index < qw_count ? false : true;
       break;
-    case Pointwise : 
+    case Pointwise :
       load_store_status.weight.index.wgt  = 0;
       load_store_status.weight.index.kout = kout_index < kout_count ? load_store_status.weight.index.kout + 1 : load_store_status.weight.index.kout;
       load_store_status.weight.done       = kout_index < kout_count ? false : true;
@@ -393,7 +393,7 @@ void ResetOutFeatStoreIteration(){
   load_store_status.outfeat.index.word = 0;// Use for 8 and 32 bit quantizations
   load_store_status.outfeat.index.wout = 0;
   load_store_status.outfeat.index.hout = 0;
-  if(ctrl_config_.config0.strided2x2){
+  if(ctrl_config_.config0.strided2x2) {
     if(!(NeurekaPECountX%2==0 && NeurekaPECountY%2==0)){
       load_store_status.outfeat.index.wout = prev_tiles.index.wout % 2;
       load_store_status.outfeat.index.hout = prev_tiles.index.hout % 2;
@@ -411,6 +411,34 @@ int OutFeatStoreWidth(){
     else return 4*current_tile_sizekout_rem;
   else return current_tile_size.kout;
 }
+
+  void OutFeatStoreIteration2() {
+    // aliases for brevity
+    auto &word_index = load_store_status.outfeat.index.word;
+    auto &wout_index = load_store_status.outfeat.index.wout;
+    auto &hout_index = load_store_status.outfeat.index.hout;
+    const auto &word_count = load_store_status.outfeat.count.word;
+    const auto &wout_count = load_store_status.outfeat.count.wout;
+    const auto &hout_count = load_store_status.outfeat.count.hout;
+
+    assert(!ctrl_config_.config0.strided2x2 && "Stride2x2 mode is unsupported");
+
+    load_store_status.outfeat.done = false;
+
+    word_index++;
+    if (word_index >= word_count) {
+      word_index = 0;
+      wout_index++;
+      if (wout_index >= wout_count) {
+        wout_index = 0;
+        hout_index++;
+        if (hout_index >= hout_count) {
+          hout_index = 0;
+          load_store_status.outfeat.done = true;
+        }
+      }
+    }
+  }
 
 void OutFeatStoreIteration(){
   int word_index = load_store_status.outfeat.index.word;
@@ -599,6 +627,29 @@ StreamerConfig GetWeightLoadStreamerConfig(){
 // 7->18 -> ((7-1)>>1)*5+3
 
 
+  StreamerConfig GetOutFeatStoreStreamerConfig2() {
+    assert(!ctrl_config_.config0.strided2x2);
+
+    const auto &w_size = ctrl_config_.outfeat_stride.d1;
+    const auto &h_size = ctrl_config_.outfeat_stride.d2;
+
+    const AddrType addr_kout = prev_tiles.index.kout * NeurekaAccumulatorPerPECount
+      * (ctrl_config_.config0.quantization_bit_count == 32 ? 4 : 1); // The multiplication is needed
+    const AddrType addr_wout = prev_tiles.index.wout * NeurekaPECountX * w_size;
+    const AddrType addr_hout = prev_tiles.index.hout * NeurekaPECountY * h_size;
+
+    printf("addrs: kout=%d, wout=%d, hout=%d\n", addr_kout, addr_wout, addr_hout);
+
+    return (StreamerConfig) {
+      .base_addr = ctrl_config_.outfeat_ptr + addr_kout + addr_wout + addr_hout,
+      .stride = ctrl_config_.outfeat_stride,
+      .length = {
+        .d0 = load_store_status.outfeat.count.word,
+        .d1 = load_store_status.outfeat.count.wout,
+        .d2 = load_store_status.outfeat.count.hout
+      }
+    };
+  }
 
 StreamerConfig GetOutFeatStoreStreamerConfig(){
   // int offs = ctrl_config_.config0.strided2x2 ? 2 : 1;

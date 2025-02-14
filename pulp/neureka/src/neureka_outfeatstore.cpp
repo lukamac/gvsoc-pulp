@@ -21,42 +21,41 @@
 #include "neureka.hpp"
 #include <type_traits>
 #include <limits.h>
+
 void Neureka::OutFeatStoreSetup() {
-  StreamerConfig streamer_config = this->ctrl_instance.GetOutFeatStoreStreamerConfig();
+  StreamerConfig streamer_config = this->ctrl_instance.GetOutFeatStoreStreamerConfig2();
   this->outfeat_streamer_instance.Init(streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
   this->ctrl_instance.ResetOutFeatStoreIteration();
   if(this->trace_config.setup.outfeat_store)
     this->trace.msg("OutFeatStore Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
 }
+
 void Neureka::ResetAllAccumBuffer(){
   for(int i=0; i<NeurekaTotalPECountXY; i++)
     this->pe_instances[i].ResetAllAccumBuffer();
 }
+
+static inline OutFeatType clip(const OutFeatType x, const OutFeatType lo, const OutFeatType hi) {
+  return std::max(lo, std::min(hi, x));
+}
+
 OutFeatType Neureka::OutFeatQuant(const OutFeatType input){
-  OutFeatType output = input;
   if(reg_config_.config0.quantization_bit_count==8 && reg_config_.config0.outfeat_quant)
-    if(reg_config_.config0.use_relu || reg_config_.config0.signed_outfeat==false){
-      if(input < 0) output = 0;
-      else if (input>255) output = 255;
-      return output;
+    if(reg_config_.config0.use_relu || !reg_config_.config0.signed_outfeat){
+      return clip(input, 0, 255);
     }else{
-      if(input < -128) output = -128;
-      else if (input>127) output = 127;
-      return output;
+      return clip(input, -128, 127);
     }
   else if (reg_config_.config0.quantization_bit_count==32 && reg_config_.config0.outfeat_quant)
-    if(reg_config_.config0.use_relu || reg_config_.config0.signed_outfeat==false){
-      if(input < 0) output = 0;
-      else if (input>0xffffffff) output = 0xffffffff;
-      return output;
+    if(reg_config_.config0.use_relu || !reg_config_.config0.signed_outfeat){
+      return clip(input, 0, 0xffffffff);
     }else{ 
-       if(input < INT_MIN) output = INT_MIN;
-      else if (input>0xffffffff) output = 0xffffffff;
-      return output;
+      return clip(input, INT_MIN, INT_MAX);
     }
   else 
-    return output;
+    return input;
 }
+
 bool Neureka::OutFeatStoreExecute(int& latency)
 {
   int width = this->ctrl_instance.OutFeatStoreWidth();
@@ -67,16 +66,15 @@ bool Neureka::OutFeatStoreExecute(int& latency)
   // std::cout<<"pe_index="<<pe_index<<"\n";
   if(this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count==32){
     for(int i=0; i<width/4; i++){
-        OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(word_index+i);
+        const OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(word_index+i);
         OutFeatType data = OutFeatQuant(temp_data);
         for(int j=0; j<4; j++){
-          StreamerDataType streamer_data = (data & (0xFF << 8*j)) >> (8*j);
-          store_data[i*4+j] = streamer_data;
+          store_data[i*4+j] = (data >> (8*j)) & 0xff;
         }
     }
   } else if (this->regconfig_manager_instance.reg_config_.config0.quantization_bit_count==8) {
     for(int i=0; i<width; i++){
-        OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(i);
+        const OutFeatType temp_data = this->pe_instances[pe_index].ReadFromIndexAccumBuffer(i);
         OutFeatType data = OutFeatQuant(temp_data);
         store_data[i] = (StreamerDataType)data; 
     }
@@ -87,15 +85,13 @@ bool Neureka::OutFeatStoreExecute(int& latency)
   uint64_t cycles = 0;
 
   this->outfeat_streamer_instance.VectorStore(store_data, width, cycles, this->trace_config.streamer.outfeat_store);
-  latency = latency + (int)cycles ? latency + (int)cycles : 1 ;
   this->num_mem_access_bytes.outfeat_store += width;
   
-  this->ctrl_instance.OutFeatStoreIteration();
+  this->ctrl_instance.OutFeatStoreIteration2();
   bool streamout_done = this->ctrl_instance.load_store_status.outfeat.done;
   if(streamout_done){
     ResetAllAccumBuffer();
   }
- 
 
   return streamout_done;
 }

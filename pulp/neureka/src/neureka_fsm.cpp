@@ -233,7 +233,19 @@ int Neureka::fsm() {
     case UPDATE_IDX:
       this->debug_stop_prefetch = this->fsm_event->get_cycle();
       this->ctrl_instance.CheckTileStatus();
-      state_next = this->ctrl_instance.tiles.done.kin==false ? ((this->reg_config_.config0.infeat_prefetch==true)? WEIGHTOFFSET : LOAD_SETUP) : reg_config_.config0.outfeat_quant ? NORMQUANT_SHIFT_SETUP : STREAMOUT_SETUP;
+      if (!this->ctrl_instance.tiles.done.kin) {
+        if (this->reg_config_.config0.infeat_prefetch) {
+          state_next = WEIGHTOFFSET;
+        } else {
+          state_next = LOAD_SETUP;
+        }
+      } else {
+        if (this->reg_config_.config0.outfeat_quant) {
+          state_next = NORMQUANT_SHIFT_SETUP;
+        } else {
+          state_next = STREAMOUT_SETUP;
+        }
+      }
       this->ctrl_instance.UpdateTileIndex();
       latency = overhead.update_idx;
       this->state_cycles.update_idx += latency;
@@ -258,7 +270,15 @@ int Neureka::fsm() {
       break;
     case NORMQUANT_MULT:
       normquant_mult_done = NormQuantMultExecute(latency);
-      state_next = normquant_mult_done==false ? NORMQUANT_MULT : reg_config_.config0.norm_option_bias ? NORMQUANT_BIAS_SETUP : STREAMOUT_SETUP;
+      if (!normquant_mult_done) {
+        state_next = NORMQUANT_MULT;
+      } else {
+        if (reg_config_.config0.norm_option_bias) {
+          state_next = NORMQUANT_BIAS_SETUP;
+        } else {
+          state_next = STREAMOUT_SETUP;
+        }
+      }
       latency = normquant_mult_done ? latency+overhead.norm_mult : latency;
       this->state_cycles.norm_mult += latency;
       break;
@@ -274,7 +294,7 @@ int Neureka::fsm() {
       break;
     case STREAMOUT_SETUP:
       OutFeatStoreSetup();
-      state_next = STREAMOUT;      
+      state_next = STREAMOUT;
       break;
     case STREAMOUT:
       streamout_done = OutFeatStoreExecute(latency);
