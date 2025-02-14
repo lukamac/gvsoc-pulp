@@ -109,30 +109,30 @@ void Neureka::reset(bool active)
   this->num_mem_access_bytes.norm_shift = 0;
   this->num_mem_access_bytes.norm_bias = 0;
 
-  this->trace_config.streamer.infeat_load = false;
-  this->trace_config.streamer.streamin = false; 
-  this->trace_config.streamer.outfeat_store = false;
-  this->trace_config.streamer.weight_load = false;
-  this->trace_config.streamer.norm_mult = false;
-  this->trace_config.streamer.norm_shift = false; 
-  this->trace_config.streamer.norm_bias = false;
+  this->trace_config.streamer.infeat_load = true;
+  this->trace_config.streamer.streamin = true; 
+  this->trace_config.streamer.outfeat_store = true;
+  this->trace_config.streamer.weight_load = true;
+  this->trace_config.streamer.norm_mult = true;
+  this->trace_config.streamer.norm_shift = true; 
+  this->trace_config.streamer.norm_bias = true;
 
-  this->trace_config.setup.infeat_load = false;
-  this->trace_config.setup.streamin = false; 
-  this->trace_config.setup.outfeat_store = false;
-  this->trace_config.setup.weight_load = false;
-  this->trace_config.setup.norm_mult = false;
-  this->trace_config.setup.norm_shift = false; 
-  this->trace_config.setup.norm_bias = false;
+  this->trace_config.setup.infeat_load = true;
+  this->trace_config.setup.streamin = true; 
+  this->trace_config.setup.outfeat_store = true;
+  this->trace_config.setup.weight_load = true;
+  this->trace_config.setup.norm_mult = true;
+  this->trace_config.setup.norm_shift = true; 
+  this->trace_config.setup.norm_bias = true;
   this->adjust_weightoffset_cycles = 0;
 
-  this->trace_config.execute.infeat_load = false;
-  this->trace_config.execute.streamin = false; 
-  this->trace_config.execute.outfeat_store = false;
-  this->trace_config.execute.weight_load = false;
-  this->trace_config.execute.norm_mult = false;
-  this->trace_config.execute.norm_shift = false; 
-  this->trace_config.execute.norm_bias = false;
+  this->trace_config.execute.infeat_load = true;
+  this->trace_config.execute.streamin = true; 
+  this->trace_config.execute.outfeat_store = true;
+  this->trace_config.execute.weight_load = true;
+  this->trace_config.execute.norm_mult = true;
+  this->trace_config.execute.norm_shift = true; 
+  this->trace_config.execute.norm_bias = true;
 
   this->debug_state_status.infeat_load = false;
   this->debug_state_status.streamin = false; 

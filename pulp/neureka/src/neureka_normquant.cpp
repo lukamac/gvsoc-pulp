@@ -41,6 +41,7 @@ void Neureka::NormQuantShiftSetup(){
   if(this->trace_config.setup.norm_shift)
     this->trace.msg("Normquant shift Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);   
 }
+
 void Neureka::NormQuantBiasSetup(){
   StreamerConfig streamer_config = this->ctrl_instance.GetNormquantBiasStreamerConfig();
   this->normquant_bias_streamer_instance.Init(streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);
@@ -48,7 +49,6 @@ void Neureka::NormQuantBiasSetup(){
   if(this->trace_config.setup.norm_bias)
     this->trace.msg("Normquant bias Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);    
 }
-
 
 bool Neureka::NormQuantMultExecute(int& latency){
   int width = this->ctrl_instance.GetNormQuantMultWidth();
