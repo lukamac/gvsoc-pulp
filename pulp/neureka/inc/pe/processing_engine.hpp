@@ -45,7 +45,7 @@ class ProcessingEngine
   HwpeType* accel_instance_;
 
   RegConfig reg_config_;
-  std::array<OutFeatType, NeurekaColumnPerPECount> normquant_bias_, normquant_mult_;
+  std::array<OutFeatType, NeurekaColumnPerPECount> normquant_bias_;
   std::array<OutFeatType, NeurekaColumnPerPECount> normquant_shift_;
 
 
@@ -119,14 +119,6 @@ public:
     std::array<OutFeatType,NeurekaColumnPerPECount> data;
     std::fill(data.begin(), data.end(), 0);
     accum_buffer_.Write(enable, data);  
-  }
-
-  void InitializeNormQuantMultBuffer(const std::array<OutFeatType, L1BandwidthInBytes>& mult, int width){
-    for(int i=0; i<hw_param_.AccumulatorPerPECount; i++){
-      normquant_mult_[i] = 0;
-      if(i<width)
-        normquant_mult_[i] = mult[i];
-    }
   }
 
 };

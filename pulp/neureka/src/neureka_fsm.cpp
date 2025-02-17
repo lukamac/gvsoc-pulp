@@ -112,7 +112,6 @@ int Neureka::fsm() {
    switch(this->state.get()) {
     case START:
       this->busy.set(1);
-      std::cout<<"NID = "<<this->nid<<"\n";
       this->regconfig_manager_instance.PrintReg();
       this->ctrl_instance.SetConfig(regconfig_manager_instance.reg_config_);
       state_next = reg_config_.config0.streamin ? STREAMIN_SETUP : LOAD_SETUP;

@@ -53,7 +53,6 @@ Neureka::Neureka(vp::ComponentConf &config)
 
 //   this->nid = get_config_int("nid");
   this->nid = this->get_js_config()->get("nid")->get_int();
-  std::cout<<"******* nid ***********"<<this->nid<<"\n";
   this->new_reg("fsm_state", &this->state, 32);//FSM state register
   this->new_reg("neureka_busy", &this->busy, 8);//Busy is high when neureka is operating
   this->busy.set(0);

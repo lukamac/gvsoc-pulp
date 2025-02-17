@@ -50,61 +50,73 @@ void Neureka::NormQuantBiasSetup(){
     this->trace.msg("Normquant bias Setup is done addr : 0x%x, strides( d0 : 0x%x, d1 : 0x%x, d2 : 0x%x), lengths(d0 : %d, d1 : %d, d2 : %d)\n", streamer_config.base_addr, streamer_config.stride.d0, streamer_config.stride.d1, streamer_config.stride.d2, streamer_config.length.d0, streamer_config.length.d1, streamer_config.length.d2);    
 }
 
-bool Neureka::NormQuantMultExecute(int& latency){
-  int width = this->ctrl_instance.GetNormQuantMultWidth();
+bool Neureka::NormQuantMultExecute(int& latency) {
+  // Aliases
+  auto &streamer = this->normquant_mult_streamer_instance;
+  auto &ctrl = this->ctrl_instance;
+  const auto &config0 = this->reg_config_.config0;
+
+  // Fetch raw data
+  uint8_t raw_data[L1BandwidthInBytes];
   uint64_t cycles = 0;
-  std::array<InFeatType, L1BandwidthInBytes> normquant_mult_8bits;
+  const auto width = ctrl.GetNormQuantMultWidth();
+  streamer.VectorLoad(raw_data, width, cycles, this->trace_config.streamer.norm_mult);
+  latency += cycles;
+  this->num_mem_access_bytes.norm_mult += width; // Just for tracing
 
-  InFeatType normquant_mult_8bits_temp[width];
-  if(this->reg_config_.config0.residual)
-      std::fill(normquant_mult_8bits.begin(), normquant_mult_8bits.end(), 1);
-  else {
-    this->normquant_mult_streamer_instance.VectorLoad(normquant_mult_8bits_temp, width, cycles, this->trace_config.streamer.norm_mult);
-    for(int i=0; i<width; i++){
-      normquant_mult_8bits[i] = normquant_mult_8bits_temp[i];
+  // Transform raw data into scale
+  int32_t scale[L1BandwidthInBytes];
+  int scale_width;
+  std::memset(scale, 0xaa, L1BandwidthInBytes);
+  if (config0.normalization_bit_count == 8) {
+    scale_width = width;
+    for (int i = 0; i < scale_width; i++) {
+      scale[i] = (int32_t)(((int8_t *)raw_data)[i]);
     }
-    latency = latency + (int)cycles ? latency + (int)cycles : 1 ;
-    this->num_mem_access_bytes.norm_mult += width;
-  }
-  std::array<OutFeatType, L1BandwidthInBytes> normquant_mult_32bits;
-  if(this->reg_config_.config0.normalization_bit_count==32){
-    int index=0;
-    for(int i=0; i<width; i=i+4){
-      normquant_mult_32bits[index] = normquant_mult_8bits[i+3]<<24 + normquant_mult_8bits[i+2]<<16 + normquant_mult_8bits[i+1]<<8 + normquant_mult_8bits[i];
-      index++;
-    }
-  }else{
-    for(int i=0; i<width; i++){
-      int8_t val = (int8_t) normquant_mult_8bits[i];
-      normquant_mult_32bits[i] = (int32_t)val;
+  } else if (config0.normalization_bit_count == 32) {
+    assert(width % 4 == 0);
+    scale_width = width / 4;
+    for (int i = 0; i < scale_width; i++) {
+      scale[i] = (((int32_t)raw_data[i*4])) +
+        (((int32_t)raw_data[i*4+1]) << 8) +
+        (((int32_t)raw_data[i*4+2]) << 16) +
+        (((int32_t)raw_data[i*4+3]) << 24);
     }
   }
-  int width_32 = this->reg_config_.config0.normalization_bit_count==8 ? width : width/4;
 
-  for(int i=0; i<NeurekaTotalPECountXY; i++){
-    this->pe_instances[i].InitializeNormQuantMultBuffer(normquant_mult_32bits, width_32);
-    for(int j=0; j<width; j=j+4){
-      std::array<int, 4> index = {j, j+1, j+2, j+3};
-      std::array<int, 4> enable = {1, 1, 1, 1};
-      std::array<OutFeatType, 4> norm = {};
-      std::array<OutFeatType, 4> shift = {};
-      for(int k=j; k<4+j; k++){
-        norm[k-j] = k<width ? normquant_mult_32bits[k] : 0;
-        if(this->reg_config_.config0.norm_option_bias)
-          shift[k-j] = 0;
-        else if(this->reg_config_.config0.norm_option_shift)
-          shift[k-j] = k<width ? this->shift_values[k] : 0;
-        else 
-          shift[k-j] = k<width ? this->reg_config_.config0.quantization_right_shift : 0;
-      }
-        this->pe_instances[i].NormQuantMult(index, enable, norm, shift);
+  // Generate shift data
+  std::array<OutFeatType, NeurekaAccumulatorPerPECount> shift;
+  if (config0.norm_option_bias) {
+    // shift in bias step
+    std::fill(shift.begin(), shift.end(), 0);
+  } else if (config0.norm_option_shift) {
+    for (int i = 0; i < scale_width; i++) {
+      shift[i] = this->shift_values[i];
+    }
+  } else {
+    std::fill_n(shift.begin(), scale_width, config0.quantization_right_shift);
+  }
+
+  // Calculate scaled and optionally shifted result
+  // We have offset because of the 32bit mode which processes 8
+  // values at time due to bandwidth limitations
+  const auto index_offset = ctrl.tiles.index.norm_quant_mult * 8;
+  for (auto &pe : this->pe_instances) {
+    for (int i = 0; i < scale_width; i++) {
+      const auto accum_index = index_offset + i;
+      const auto accum = pe.ReadFromIndexAccumBuffer(accum_index);
+      // saturating scale
+      const int64_t accum_scaled_i64 = (int64_t)accum * (int64_t)scale[i];
+      const int64_t accum_scaled_saturated_i48 = std::max((int64_t)(-(1l << 47)), std::min((int64_t)((1l << 47) - 1), accum_scaled_i64));
+      const OutFeatType accum_scaled_and_shifted = (int32_t)((accum_scaled_saturated_i48 >> shift[i]) & 0xffffffff);
+      pe.WriteAtIndexOnAccumBuffer(accum_index, true, accum_scaled_and_shifted);
     }
   }
-  bool done = this->ctrl_instance.NormQuantMultIteration();
-
+  // TODO: Explanation of latency; has to do something with the fact there are 4 multipliers
+  // and the bandwidth is 32 bytes to fetch from tcdm...
   latency += 8;
-  // this->trace.msg("mult accum_0 %d\n", this->pe_instances[0].ReadFromIndexAccumBuffer(0));
-  return done;
+
+  return ctrl.NormQuantMultIteration();
 }
 
 bool Neureka::NormQuantShiftExecute(int& latency){

@@ -38,31 +38,11 @@ class NormalizationQuantizationUnit{
       adder_count_ = NormAdderCount;
     }
 
-    std::array<OutFeatType, 4>  NormQuantMult(const std::array<OutFeatType, 4>& input, const std::array<NormType, 4>& kappa, const std::array<NormType, 4>& shift){
-      std::array<OutFeatType, 4> accum = {0};
-      if(reg_config_.config0.normalization_bit_count==8){
-        for(int i=0; i<4; i++)
-        {
-          accum[i] = kappa[i]*input[i];
-          accum[i] = accum[i]>>shift[i];
-        }
-        return accum;
-      } else if(reg_config_.config0.normalization_bit_count==16){
-        for(int i=0; i<1; i++){
-          accum[i] = kappa[i]*input[i];
-          accum[i] = accum[i]>>shift[i];
-        
-        }
-        return accum;
-      } else if(reg_config_.config0.normalization_bit_count==32){
-        for(int i=0; i<1; i++){
-          accum[i] = kappa[i]*input[i];
-          accum[i] = accum[i]>>shift[i];
-        }
-        return accum;
-      }
-      else{
-        accel_instance_->trace.fatal("Unsupported mode\n");
+    std::array<int32_t, 4>  NormQuantMult(const std::array<int32_t, 4>& input, const std::array<NormType, 4>& kappa, const std::array<NormType, 4>& shift){
+      std::array<int32_t, 4> accum = {0};
+      for(int i=0; i<4; i++) {
+        accum[i] = kappa[i]*input[i];
+        accum[i] = accum[i]>>shift[i];
       }
       return accum;
     }

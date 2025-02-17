@@ -638,15 +638,13 @@ StreamerConfig GetWeightLoadStreamerConfig(){
     const AddrType addr_wout = prev_tiles.index.wout * NeurekaPECountX * w_size;
     const AddrType addr_hout = prev_tiles.index.hout * NeurekaPECountY * h_size;
 
-    printf("addrs: kout=%d, wout=%d, hout=%d\n", addr_kout, addr_wout, addr_hout);
-
     return (StreamerConfig) {
       .base_addr = ctrl_config_.outfeat_ptr + addr_kout + addr_wout + addr_hout,
       .stride = ctrl_config_.outfeat_stride,
       .length = {
-        .d0 = load_store_status.outfeat.count.word,
-        .d1 = load_store_status.outfeat.count.wout,
-        .d2 = load_store_status.outfeat.count.hout
+        .d0 = static_cast<unsigned int>(load_store_status.outfeat.count.word),
+        .d1 = static_cast<unsigned int>(load_store_status.outfeat.count.wout),
+        .d2 = static_cast<unsigned int>(load_store_status.outfeat.count.hout)
       }
     };
   }
@@ -795,18 +793,22 @@ void ResetNormQuantMultIteration(){tiles.index.norm_quant_mult = 0;}
 void ResetNormQuantShiftIteration(){tiles.index.norm_quant_shift = 0;}
 void ResetNormQuantBiasIteration(){tiles.index.norm_quant_bias = 0;}
 
-bool NormQuantMultIteration(){
+bool NormQuantMultIteration() {
   tiles.index.norm_quant_mult++; 
+
   if(ctrl_config_.config0.normalization_bit_count == 32){
+    // We can operate on 8 values per fetch because the bandwidth is 32bytes towards tcdm mem
     tiles.count.norm_quant_mult = (current_tile_size.kout & 0x7) ? 1+ (current_tile_size.kout>>3) : (current_tile_size.kout >> 3);
   } else {
     tiles.count.norm_quant_mult = 1;
   }
+
   if(tiles.index.norm_quant_mult==tiles.count.norm_quant_mult)
     return true;
   else 
     return false;
 }
+
 bool NormQuantShiftIteration(){
   tiles.index.norm_quant_shift++;
   if(tiles.index.norm_quant_shift==tiles.count.norm_quant_shift)
@@ -814,6 +816,7 @@ bool NormQuantShiftIteration(){
   else 
     return false;
 }
+
 bool NormQuantBiasIteration(){
   tiles.index.norm_quant_bias++;
   tiles.count.norm_quant_bias = (current_tile_size.kout & 0x7) ? 1+ (current_tile_size.kout>>3) : (current_tile_size.kout>>3);
@@ -824,14 +827,15 @@ bool NormQuantBiasIteration(){
     return false;
 }
 
-int GetNormQuantMultWidth(){
+int GetNormQuantMultWidth() {
   if(ctrl_config_.config0.normalization_bit_count == 8)
     return current_tile_size.kout;
   else {
-    if(tiles.index.norm_quant_mult==tiles.count.norm_quant_mult-1)
-      return  ((current_tile_size.kout-(tiles.index.norm_quant_mult<<3))<<2);
-    else
-      return 32;
+    const int per_iteration_kout = L1BandwidthInBytes / 4;
+    const int processed_kout = tiles.index.norm_quant_mult * per_iteration_kout;
+    const int remaining_kout = current_tile_size.kout - processed_kout;
+    assert(remaining_kout > 0);
+    return std::min(L1BandwidthInBytes, remaining_kout * 4);
   }
 }
 
