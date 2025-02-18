@@ -20,6 +20,7 @@
  */
 #include "neureka.hpp"
 #include <type_traits>
+#include <cstring>
 
 void Neureka::NormQuantMultSetup(){
   for(int i=0; i<NeurekaTotalPECountXY; i++)
